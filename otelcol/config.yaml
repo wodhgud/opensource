@@ -35,6 +35,7 @@ service:
       exporters: [otlphttp/prometheus]
   telemetry:
     metrics:
+      level: detailed
       readers:
         - pull:
             exporter:

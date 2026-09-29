@@ -1,0 +1,86 @@
+# Tempo 테스트용 데모: loadgen → nginx(OTel module) → java-app(OTel Java agent) → otelcol
+# 메인 스택(../docker-compose.yml)을 먼저 띄운 뒤 실행하세요.
+name: otel-demo
+
+services:
+  java-app:
+    build: ./java-app
+    container_name: java-app
+    environment:
+      OTEL_SERVICE_NAME: java-app
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=demo
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+      OTEL_METRIC_EXPORT_INTERVAL: "15000"
+      # Pyroscope (span profiles)
+      PYROSCOPE_APPLICATION_NAME: java-app
+      PYROSCOPE_SERVER_ADDRESS: http://pyroscope:4040
+      # span profile 은 CPU(itimer) 프로파일에만 연결됨 (jfr 포맷에서는 span 연결 안 됨)
+      PYROSCOPE_PROFILER_EVENT: itimer
+      PYROSCOPE_LABELS: deployment.environment=demo
+      # 루트 span 이 nginx 이므로 java 의 모든 span 에 pyroscope.profile.id 부여
+      OTEL_PYROSCOPE_ROOT_SPAN_ONLY: "false"
+      OTEL_PYROSCOPE_ADD_SPAN_NAME: "true"
+    ports:
+      - "8082:8080"
+    restart: unless-stopped
+
+  tomcat-app:
+    build: ./tomcat-app
+    container_name: tomcat-app
+    environment:
+      OTEL_SERVICE_NAME: tomcat-app
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment=demo
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+      OTEL_METRIC_EXPORT_INTERVAL: "15000"
+      PYROSCOPE_APPLICATION_NAME: tomcat-app
+      PYROSCOPE_SERVER_ADDRESS: http://pyroscope:4040
+      PYROSCOPE_PROFILER_EVENT: itimer
+      PYROSCOPE_LABELS: deployment.environment=demo
+      OTEL_PYROSCOPE_ROOT_SPAN_ONLY: "false"
+      OTEL_PYROSCOPE_ADD_SPAN_NAME: "true"
+      JAVA_APP_URL: http://java-app:8080
+      DB_URL: jdbc:postgresql://postgres:5432/grafana
+      DB_USER: grafana
+      DB_PASSWORD: grafana
+    ports:
+      - "8083:8080"
+    depends_on: [java-app]
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:stable-otel
+    container_name: nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8081:80"
+    depends_on: [java-app, tomcat-app]
+    restart: unless-stopped
+
+  loadgen:
+    image: curlimages/curl:latest
+    container_name: loadgen
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          for p in /api/hello /api/slow /api/cpu /api/chain /api/error /tomcat/hello /tomcat/call /tomcat/db /; do
+            curl -s -o /dev/null -w "%{http_code} $$p\n" "http://nginx$$p"
+          done
+          sleep 2
+        done
+    depends_on: [nginx]
+    restart: unless-stopped
+
+networks:
+  default:
+    name: observability
+    external: true

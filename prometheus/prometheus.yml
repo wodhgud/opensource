@@ -1,5 +1,7 @@
 global:
   scrape_interval: 15s
+  # UTF-8 메트릭 이름(http.server.request.duration 등)을 _ 로 치환해 수집 (대시보드 호환)
+  metric_name_validation_scheme: legacy
 
 scrape_configs:
   - job_name: prometheus
@@ -17,3 +19,12 @@ scrape_configs:
   - job_name: alloy
     static_configs:
       - targets: ["alloy:12345"]
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]
+  - job_name: pyroscope
+    static_configs:
+      - targets: ["pyroscope:4040"]
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
